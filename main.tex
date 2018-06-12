@@ -1,0 +1,170 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{listings}
+\usepackage{color}
+\usepackage[left=2cm,right=2cm,top=2.5cm,bottom=2.5cm]{geometry}
+\usepackage{amsmath}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+ 
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\scriptsize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+
+\lstset{style=mystyle}
+
+\def \pf{{\tt pf3 }}
+
+\title{\pf\\a low-res high-density people flow estimator}
+\author{G. Guidi, A. Bazzani, S. Sinigardi}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Setup}
+Depending on your OS, getting ready to use \pf is different.
+First of all, generically we can say that \pf requires {\tt python3}, with {\tt numpy} and {\tt OpenCV} working bindings.
+On Ubuntu/WSL, the suggested procedure follows:
+
+%                  python-dev python-numpy libtbb2 libtbb-dev libdc1394-22-dev 
+%## fix the "libdc1394 error: Failed to initialize libdc1394"
+%$ sudo ln /dev/null /dev/raw1394
+\begin{lstlisting}[language=bash, caption=Install on Ubuntu]
+$ sudo apt install build-essential cmake git \
+                   libgtk2.0-dev pkg-config \
+                   libavcodec-dev libavformat-dev \
+                   libswscale-dev libjpeg-dev \
+                   libpng-dev libtiff-dev \
+                   libjasper-dev execstack
+$ wget https://repo.continuum.io/archive/Anaconda3-5.0.0.1-Linux-x86_64.sh
+$ bash Anaconda3-5.0.0.1-Linux-x86_64.sh
+## Remove execution stack flag from OpenSSL lib (better security, required for WSL)
+$ execstack -c anaconda3/lib/libcrypto.so.1.0.0
+$ conda create --name pf-py36 python=3.6 numpy jupyter
+$ source activate pf-py36   # (exit with source deactivate pf-py36)
+$ wget https://github.com/opencv/opencv/archive/3.3.0.tar.gz
+$ tar zxvf 3.3.0.tar.gz
+$ cd opencv-3.3.0
+$ mkdir build ; cd build
+$ cmake -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DWITH_1394=OFF 
+        -DPYTHON3_EXECUTABLE=$HOME/anaconda3/envs/pf-py36/bin/python \
+        -DPYTHON_INCLUDE_DIR=$HOME/anaconda3/envs/pf-py36/include/python3.6m \
+        -DPYTHON_LIBRARY=$HOME/anaconda3/envs/pf-py36/lib/libpython3.6m.so \
+        -DPYTHON3_NUMPY_INCLUDE_DIRS=$HOME/anaconda3/envs/pf-py36/lib/python3.6/site-packages/numpy/core/include \
+        ..
+$ make -j
+$ sudo make install
+## Remove execution stack flag from OpenCV libs (better security, required for WSL)
+$ cd /usr/local/lib
+$ find . -type f -name "libopencv_*.so.3.3.0" -exec sudo execstack -c {} \;
+$ cd ~/anaconda3/envs/pf-py36/lib/python3.6/site-packages/
+$ ln -s /usr/local/lib/python3.6/site-packages/cv2.cpython-36m-x86_64-linux-gnu.so cv2.so
+\end{lstlisting}
+
+On macOS, otherwise, the following procedure is known to work, after installing \texttt{Anaconda3} and \texttt{Homebrew}
+\begin{lstlisting}[language=bash, caption=Install on macOS]
+$ brew install python python3 cmake pkg-config jpeg libpng libtiff openexr eigen tbb numpy
+$ brew doctor # be sure to be ready to brew!
+$ brew install opencv3 --with-python3 --without-python --with-ffmpeg
+$ pip3 install virtualenv virtualenvwrapper
+$ pip install virtualenv virtualenvwrapper
+$ echo source /usr/local/bin/virtualenvwrapper.sh >> ~/.bash_profile
+$ mkvirtualenv pf-py36 -p python3
+$ workon pf-py36       # (exit with deactivate pf-py3)
+$ pip install numpy
+$ cd ~/.virtualenvs/pf-py3/lib/python3.6/site-packages/
+$ ln -s /usr/local/opt/opencv3/lib/python3.6/site-packages/cv2.cpython-36m-darwin.so cv2.so
+\end{lstlisting}
+
+On Windows (64 bit), we tested this procedure after installing \texttt{Anaconda3}, \texttt{vcpkg} and \texttt{Chocolatey}:
+\begin{lstlisting}[language=bash, caption=Install on Windows]
+PS \> cinst -y 7zip
+PS \> refreshenv
+PS \> cd $env:WORKSPACE/vcpkg
+PS vcpkg \> .\vcpkg.exe install ffmpeg opencv
+PS vcpkg \> cd ..
+PS $env:WORKSPACE \> Import-Module BitsTransfer
+PS $env:WORKSPACE \> Start-BitsTransfer -Source "https://github.com/opencv/opencv/archive/3.2.0.tar.gz" -Destination "OpenCV.tar.gz"
+PS $env:WORKSPACE \> 7z e OpenCV.tar.gz  ; 7z x OpenCV.tar
+## open the Anaconda prompt
+A \> cd %WORKSPACE%/opencv-3.2.0
+A \> mkdir build ; cd build
+A \> cmake -G "Visual Studio 15 2017 Win64" "-DCMAKE_BUILD_TYPE=Release" "-DWITH_CUDA=OFF" "-DCMAKE_TOOLCHAIN_FILE=%WORKSPACE%\vcpkg\scripts\buildsystems\vcpkg.cmake" "-DCMAKE_INSTALL_PREFIX=%HOME%" ..
+A \> cmake --build . --target install --config Release
+A \> conda create --name pf-py36 python=3.6 numpy jupyter
+A \> copy %HOME%\Anaconda3\Lib\site-packages\cv2.cp36-win_amd64.pyd %HOME%\Anaconda3\envs\pf-py36\Lib\site-packages\cv2.pyd 
+## Finally add to the user's PATH environment variable this folder:
+## %HOME%\x64\vc15\bin
+\end{lstlisting}
+
+Finally, you should be able to test your installation:
+\begin{lstlisting}[language=python, caption=Test]
+>>> import cv2
+>>> cv2.__version__
+'3.2.0'
+\end{lstlisting}
+
+After being ready with the prerequisites, we can discuss now what's necessary to run the software
+
+\section{Algorithm}
+Let \(A,B,C\) three regions of the same length \(\ell\) (we neglect transverse size, assuming it also constant) and \(n^{\pm}_{A,B,C}\) the number of individuals in the regions moving in opposite directions. 
+The individuals move at a velocity \(v\) and are uniformly distributed in the regions (strong assumption, which signifies that our algorithm could be wrong in short times, but should improve with longer periods analyzed).
+We denote by \(\Phi^{\pm}\) the incoming flows from left and right in the considered area. In a time interval \(\Delta t\), we call \(n^+_A(t)p\), with \(p \leq 1\), the number of individuals that move from the region A to B. Using similar relations, we have the equations
+\begin{align*}
+n^+_A(t + \Delta t) &= n^+_A(t)(1 - p) + \Phi^+(t + \Delta t) \Delta t  \\
+n^+_B(t + \Delta t) &= n^+_B(t)(1 - p) + n^+_A(t)p                      \\
+n^+_C(t + \Delta t) &= n^+_C(t)(1 - p) + n^+_B(t)p                      \\
+n^-_A(t + \Delta t) &= n^-_A(t)(1 - p) + n^-_B(t)p                      \\
+n^-_B(t + \Delta t) &= n^-_B(t)(1 - p) + n^-_C(t)p                      \\
+n^-_C(t + \Delta t) &= n^-_C(t)(1 - p) + \Phi^-(t + \Delta t) \Delta t
+\end{align*}
+
+Assuming known (counting pixels different from the background)
+\begin{align*}
+n_A(t+\Delta t) = n^+_A(t+\Delta t)+n^-_A(t+\Delta t) \\
+n_B(t+\Delta t) = n^+_B(t+\Delta t)+n^-_B(t+\Delta t) \\
+n_C(t+\Delta t) = n^+_C(t+\Delta t)+n^-_C(t+\Delta t)
+\end{align*}
+
+we get a system of nine equation with nine unknown quantities: \(n^{\pm}_{A,B,C}(t + \Delta t)\), \(\Phi^{\pm}(t + \Delta t)\) and \(p\).
+The linear system can be solved step by step if we know the initial conditions \(n^{\pm}_{A,B,C}(0)\) and we measure \(n_{A,B,C}(t)\) each time. The probability \(p\) can also be related to the individual velocity
+\[
+p(t) = \ell \, v(t) \Delta t 
+\]
+so that in principle we could also obtain an estimate of \(v(t)\) at different times. The error propagation depends from the eigenvalues of the linear system
+\begin{align*}
+n^+_A(t + \Delta t) +  n^+_A(t)p   - \Phi^+(t + \Delta t)\Delta t &= n^+_A(t)        \\
+n^+_B(t + \Delta t) + (n^+_B(t)    - n^+_A(t))p                   &= n^+_B(t)        \\
+n^+_C(t + \Delta t) - (n^+_C(t)    - n^+_B(t))p                   &= n^+_C(t)        \\
+n^-_A(t + \Delta t) - (n^-_A(t)    - n^-_B(t))p                   &= n^-_A(t)        \\
+n^-_B(t + \Delta t) + (n^-_B(t)    - n^-_C(t))p                   &= n^-_B(t)        \\
+n^-_C(t + \Delta t) +  n^-_C(t)p   - \Phi^-(t + \Delta t)\Delta t &= n^-_C(t)        \\
+n^+_A(t + \Delta t) +  n^-_A(t+\Delta t)                          &= n_A(t+\Delta t) \\
+n^+_B(t + \Delta t) +  n^-_B(t+\Delta t)                          &= n_B(t+\Delta t) \\
+n^+_C(t + \Delta t) +  n^-_C(t+\Delta t)                          &= n_C(t+\Delta t)
+\end{align*}
+We expect that the system need to be reset after a characteristic time \(\tau\).
+ 
+
+\end{document}
+
